@@ -27,7 +27,7 @@ python bot.py
 ```
 
 
-4. Run the bot:
+4. OG Creator:
 
 ```bash
 Project originally from https://github.com/yashksaini-coder/Auto-MSG-Discord 
