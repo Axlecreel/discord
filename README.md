@@ -37,7 +37,7 @@ Project originally from https://github.com/yashksaini-coder/Auto-MSG-Discord
 
 ```bash
 ls $(pwd)/myenv/bin/python #find exact path of venv
-#!/home/user/venv/bin/python
+#!/home/axle/myenv/bin/python # #!/whatever the first command reflects
 cd discord-selfbot
 chmod +x bot.py
 ./bot.py
