@@ -27,8 +27,18 @@ python bot.py
 ```
 
 
-4. OG Creator:
+5. OG Creator:
 
 ```bash
 Project originally from https://github.com/yashksaini-coder/Auto-MSG-Discord 
+```
+
+6. ./bot.py:
+
+```bash
+ls $(pwd)/myenv/bin/python #find exact path of venv
+#!/home/user/venv/bin/python
+cd discord-selfbot
+chmod +x bot.py
+./bot.py
 ```
