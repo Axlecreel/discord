@@ -21,7 +21,7 @@ console = Console()
 CURRENT_VERSION = "1.0"
 # Replace 'YOUR_USER' and 'YOUR_REPO' with your actual GitHub details
 GITHUB_RAW_URL = "https://https://raw.githubusercontent.com/Axlecreel/discord-selfbot/refs/heads/main/bot.py"
-VERSION_URL = "https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/version.txt"
+VERSION_URL = "https://raw.githubusercontent.com/Axlecreel/discord-selfbot/refs/heads/main/version.txt"
 
 def check_for_updates():
     try:
