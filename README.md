@@ -11,7 +11,7 @@ cd discord-selfbot
 
 ```bash
 sudo apt update && sudo apt install python3-venv
-python -m venv venv #can change the last venv to any be sure to change the activation
+python3 -m venv venv #can change the last venv to any be sure to change the activation
 source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
 ```
 
@@ -24,7 +24,7 @@ pip install -r requirements.txt  # Or use `uv pip install` if available
 4. Run the bot:
 
 ```bash
-python bot.py
+python3 bot.py
 ```
 
 
