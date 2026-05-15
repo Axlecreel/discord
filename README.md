@@ -4,7 +4,7 @@
 
 ```bash
 git clone https://github.com/Axlecreel/discord-selfbot.git
-cd
+cd discord-selfbot
 ```
 
 2. Create and activate virtual environment:
