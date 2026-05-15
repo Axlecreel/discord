@@ -10,6 +10,7 @@ cd discord-selfbot
 2. Create and activate virtual environment:
 
 ```bash
+sudo apt update && sudo apt install python-venv
 python -m venv venv
 source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
 ```
