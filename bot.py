@@ -94,7 +94,9 @@ def start_bot():
         cid = entry["channel_id"]
         for m in entry['messages']:
             threading.Thread(target=message_loop, args=(m['content'], m['min_interval'], m['max_interval'], cid, tok), daemon=True).start()
-    console.print(Panel.fit("[bold green]Botting Started![/bold green]", border_style="green"))
+    
+    # Updated message as requested
+    console.print(Panel.fit("[bold green]Botting Started![/bold green]\n[white]Press Ctrl + C when you want the bot to stop[/white]", border_style="green"))
     try:
         while not shutdown_event.is_set(): sleep(1)
     except KeyboardInterrupt: shutdown_event.set()
@@ -153,7 +155,7 @@ def delete_channel_wizard():
 def main():
     while True:
         console.print(Panel.fit(BANNER, title="Discord Automator", border_style="blue"))
-        # Colored menu items restored based on image_0b471e.png
+        # Restored main menu colors
         console.print("\n1. [bold green]Start Bot[/bold green]")
         console.print("2. [bold cyan]Add New Channels[/bold cyan]")
         console.print("3. [bold magenta]Update Global Token[/bold magenta]")
