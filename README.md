@@ -3,8 +3,8 @@
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/Axlecreel/discord-selfbot.git
-cd discord-selfbot
+git clone https://github.com/Axlecreel/discord.git
+cd discord
 ```
 
 2. Create and activate virtual environment:
