@@ -1,3 +1,4 @@
+#!/home/axle/venv/bin/python
 from http.client import HTTPSConnection 
 from json import dumps, loads
 from time import sleep 
@@ -26,6 +27,12 @@ status_lock = threading.Lock()
 total_sent_global = 0
 bot_run_cache = {}
 
+# --- Helper: Time Formatting ---
+def format_seconds_to_mmss(seconds):
+    minutes = seconds // 60
+    secs = seconds % 60
+    return f"{minutes}:{secs:02d}"
+
 # --- Profile Management Helpers ---
 def get_manager():
     if os.path.exists('./config_manager.json'):
@@ -35,7 +42,7 @@ def get_manager():
     return {"active_profile": "default"}
 
 def save_manager(data):
-    with open('./config_manager.json', 'w') as f:
+    with open('./config_manager.json', 'r') as f:
         json.dump(data, f, indent=4)
 
 def list_profiles():
@@ -99,16 +106,14 @@ def save_config(config_data):
 # --- Operational Logic Functions ---
 def generate_status_table():
     table = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-    table.add_column("Nickname", style="green", width=12)
-    table.add_column("Channel ID", style="yellow", width=19)
-    table.add_column("Interval", style="blue", width=11)
+    # Removed fixed width to allow full channel name visibility
+    table.add_column("Channel(s)", style="green") 
     table.add_column("Sent (Ch)", justify="center", style="bold cyan")
     table.add_column("Current Status", width=24)
     table.add_column("Last Sent", justify="right", style="dim")
     with status_lock:
         for name, info in sorted(channel_statuses.items()):
-            cache = bot_run_cache.get(name, {"channel_id": "Unknown", "interval": "Unknown"})
-            table.add_row(name, cache["channel_id"], cache["interval"], str(info['count']), info['msg'], info['ts'])
+            table.add_row(name, str(info['count']), info['msg'], info['ts'])
     return Panel(
         Align.center(table),
         title=f"[bold white]Live Monitor[/bold white] | [bold green]Total Global Sent: {total_sent_global}[/bold green]",
@@ -144,7 +149,7 @@ def send_message_with_retry(cid, data, token, name):
                 wait_time = int(loads(body).get('retry_after', 5))
                 for i in range(wait_time, 0, -1):
                     if shutdown_event.is_set(): return False
-                    update_status(name, f"[bold red]⚠ Rate Limit: {i}s[/bold red]")
+                    update_status(name, f"[bold red]⚠ Rate Limit: {format_seconds_to_mmss(i)}[/bold red]")
                     sleep(1)
                 continue 
             elif resp.status == 401:
@@ -186,7 +191,7 @@ def message_loop(msg, mini, maxi, cid, token, name):
             delay = int(random.uniform(mini, maxi))
             for i in range(delay, 0, -1):
                 if shutdown_event.is_set(): break
-                update_status(name, f"[bold yellow]⏲ Cooldown: {i}s[/bold yellow]")
+                update_status(name, f"[bold yellow]⏲ Cooldown: {format_seconds_to_mmss(i)}[/bold yellow]")
                 sleep(1)
         else:
             if shutdown_event.is_set(): break
@@ -195,7 +200,7 @@ def message_loop(msg, mini, maxi, cid, token, name):
 def display_channel_content_table(config, title="Channel Messages"):
     table = Table(title=title, header_style="bold magenta")
     table.add_column("ID", justify="center", style="cyan")
-    table.add_column("Nickname", style="green")
+    table.add_column("Channel(s)", style="green")
     table.add_column("Channel ID", style="yellow")
     table.add_column("Interval Range", style="blue")
     table.add_column("Message Content Preview", style="white")
@@ -215,6 +220,7 @@ def fetch_channel_and_guild_info(cid, token):
             channel_data = loads(resp.read().decode())
             channel_name = channel_data.get("name", "Unknown-Channel")
             guild_id = channel_data.get("guild_id")
+            slowmode = channel_data.get("rate_limit_per_user", 0)
             
             server_name = "Direct Message / Group"
             if guild_id:
@@ -223,14 +229,13 @@ def fetch_channel_and_guild_info(cid, token):
                 if 199 < g_resp.status < 300:
                     guild_data = loads(g_resp.read().decode())
                     server_name = guild_data.get("name", "Unknown Server")
-            return server_name, channel_name
+            return server_name, channel_name, slowmode
     except Exception:
         pass
-    return None, None
+    return None, None, 0
 
 # --- Application Configuration Wizards ---
 def start_bot():
-    global bot_run_cache
     console.clear()
     config = load_config()
     if not config or not config.get("Discord_Token"): 
@@ -240,13 +245,6 @@ def start_bot():
     tok = config['Discord_Token']
     shutdown_event.clear()
     channel_statuses.clear()
-    
-    bot_run_cache = {
-        entry["name"]: {
-            "channel_id": entry["channel_id"],
-            "interval": f"{entry['messages'][0]['min_interval']}s-{entry['messages'][0]['max_interval']}s"
-        } for entry in config.get('Config', [])
-    }
     
     for entry in config.get('Config', []):
         update_status(entry["name"], "[dim]Wait...[/dim]", count=0)
@@ -260,44 +258,58 @@ def start_bot():
             shutdown_event.set()
 
 def setup_wizard():
-    console.clear()
-    config = load_config()
-    tok = config.get("Discord_Token")
-    
-    if not tok or not tok.strip():
-        console.print("[bold red]Error: Cannot add channels without a Discord Token. Please update your token first.[/bold red]")
-        sleep(2)
-        return
-    
-    cid = Prompt.ask("Channel ID (or 'c' to cancel)")
-    if cid.lower() == 'c': return
-    
-    with console.status("[bold cyan]Fetching channel and server details...[/bold cyan]"):
-        server_name, channel_name = fetch_channel_and_guild_info(cid, tok)
-            
-    if server_name and channel_name:
-        console.print(f"[bold green]✓ Connected to Server: [yellow]{server_name}[/yellow] | Channel: [yellow]#{channel_name}[/yellow][/bold green]\n")
-        default_name = channel_name
-    else:
-        console.print("[bold yellow]⚠ Could not fetch details automatically.[/bold yellow]\n")
-        default_name = ""
-
-    name = Prompt.ask("Nickname (or 'c' to cancel)", default=default_name)
-    if name.lower() == 'c': return
-    
-    msg = get_multiline_input("Message content")
-    if msg.lower() == 'c': return
-    
     while True:
-        try:
-            mini = float(Prompt.ask("Min delay", default="60"))
-            maxi = float(Prompt.ask("Max delay", default="120"))
-            break
-        except ValueError:
-            console.print("[bold red]Invalid number. Please enter digits only.[/bold red]")
+        console.clear()
+        config = load_config()
+        tok = config.get("Discord_Token")
+        
+        if not tok or not tok.strip():
+            console.print("[bold red]Error: Cannot add channels without a Discord Token. Please update your token first.[/bold red]")
+            sleep(2)
+            return
+        
+        cid = Prompt.ask("Channel ID (or 'c' to cancel)")
+        if cid.lower() == 'c': break
+        
+        with console.status("[bold cyan]Fetching channel and server details...[/bold cyan]"):
+            server_name, channel_name, slowmode = fetch_channel_and_guild_info(cid, tok)
+        
+        msg = ""
+        if config["Config"] and Prompt.ask("Copy message from an existing channel? (y/n)", default="n") == "y":
+            display_channel_content_table(config)
+            choice = Prompt.ask("Select ID to copy from")
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(config["Config"]):
+                    msg = config["Config"][idx]["messages"][0]["content"]
+            except:
+                console.print("[bold red]Invalid Selection.[/bold red]")
+        
+        if not msg:
+            msg = get_multiline_input("Message content")
+            if msg.lower() == 'c': continue
+        
+        if server_name and channel_name:
+            console.print(f"[bold green]✓ Connected: [yellow]{server_name}[/yellow] | #{channel_name}[/bold green]")
+            if slowmode > 0:
+                console.print(f"[bold yellow]⚠ Slowmode detected: {slowmode}s. Suggested min delay: {max(60, slowmode+5)}s[/bold yellow]")
+            default_name = channel_name
+        else:
+            console.print("[bold yellow]⚠ Could not fetch details.[/bold yellow]\n")
+            default_name = ""
 
-    config["Config"].append({"name": name, "channel_id": cid, "messages": [{"content": msg, "min_interval": mini, "max_interval": maxi}]})
-    save_config(config)
+        name = Prompt.ask("Channel(s)", default=default_name)
+        
+        suggested_min = str(max(60, slowmode + 5))
+        mini = float(Prompt.ask("Min delay", default=suggested_min))
+        maxi = float(Prompt.ask("Max delay", default=str(float(mini) + 30)))
+
+        config["Config"].append({"name": name, "channel_id": cid, "messages": [{"content": msg, "min_interval": mini, "max_interval": maxi}]})
+        save_config(config)
+        console.print("[bold green]Channel added![/bold green]")
+        
+        if Prompt.ask("Add another channel? (y/n)", default="y") == "n":
+            break
 
 def update_token_wizard():
     console.clear()
@@ -308,82 +320,84 @@ def update_token_wizard():
     save_config(config)
 
 def edit_message_wizard():
-    config = load_config()
-    if not config or not config.get("Config"): 
-        console.clear()
-        console.print("[bold red]No channels found in the active profile! Please add a channel first.[/bold red]")
-        sleep(2)
-        return
-        
     while True:
+        config = load_config()
+        if not config or not config.get("Config"): 
+            console.clear()
+            console.print("[bold red]No channels found in the active profile! Please add a channel first.[/bold red]")
+            sleep(2)
+            return
+            
         console.clear()
         display_channel_content_table(config, "Select Channel to Edit Message")
         choice = Prompt.ask("Select ID, 'all', or 'c' to cancel")
         if choice.lower() == 'c': return
-        if choice.lower() == 'all': break
-        try:
-            idx = int(choice) - 1
-            if 0 <= idx < len(config["Config"]): break
-            console.print(f"[bold red]Error: ID {choice} is out of range.[/bold red]")
+        
+        if choice.lower() == 'all':
+            new_msg = get_multiline_input("Enter new message for ALL channels")
+            if new_msg.lower() == 'c': continue
+            for entry in config["Config"]: entry["messages"][0]["content"] = new_msg
+            save_config(config)
+            console.print("[bold green]All messages updated![/bold green]")
             sleep(1)
-        except ValueError:
-            console.print(f"[bold red]Error: '{choice}' is not a valid ID.[/bold red]")
-            sleep(1)
-
-    new_msg = get_multiline_input("Enter new message")
-    if new_msg.lower() == 'c': return
-    if choice.lower() == 'all':
-        for entry in config["Config"]: entry["messages"][0]["content"] = new_msg
-    else:
-        config["Config"][int(choice)-1]["messages"][0]["content"] = new_msg
-    save_config(config)
-    console.print("[bold green]Message updated successfully![/bold green]")
-    sleep(1.5)
+        else:
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(config["Config"]):
+                    new_msg = get_multiline_input(f"Enter new message for {config['Config'][idx]['name']}")
+                    if new_msg.lower() == 'c': continue
+                    config["Config"][idx]["messages"][0]["content"] = new_msg
+                    save_config(config)
+                    console.print("[bold green]Message updated![/bold green]")
+                    sleep(1)
+                else:
+                    console.print("[bold red]Invalid ID.[/bold red]"); sleep(1)
+            except ValueError:
+                console.print("[bold red]Invalid input.[/bold red]"); sleep(1)
 
 def interval_wizard():
-    config = load_config()
-    if not config or not config.get("Config"): 
-        console.clear()
-        console.print("[bold red]No channels found in the active profile! Please add a channel first.[/bold red]")
-        sleep(2)
-        return
-        
     while True:
+        config = load_config()
+        if not config or not config.get("Config"): 
+            console.clear()
+            console.print("[bold red]No channels found in the active profile![/bold red]")
+            sleep(2)
+            return
+            
         console.clear()
         display_interval_table(config)
         choice = Prompt.ask("Select ID, 'all', or 'c' to cancel")
         if choice.lower() == 'c': return
-        if choice.lower() == 'all' or (choice.isdigit() and 1 <= int(choice) <= len(config["Config"])):
-            break
-        console.print("[bold red]Invalid selection. Try again.[/bold red]")
-        sleep(1)
-    
-    while True:
+        
         try:
             mini = float(Prompt.ask("New Min"))
             maxi = float(Prompt.ask("New Max"))
-            break
+            
+            if choice.lower() == 'all':
+                for entry in config["Config"]:
+                    entry["messages"][0]["min_interval"], entry["messages"][0]["max_interval"] = mini, maxi
+            elif choice.isdigit() and 1 <= int(choice) <= len(config["Config"]):
+                idx = int(choice) - 1
+                config["Config"][idx]["messages"][0]["min_interval"] = mini
+                config["Config"][idx]["messages"][0]["max_interval"] = maxi
+            else:
+                console.print("[bold red]Invalid selection.[/bold red]"); sleep(1); continue
+                
+            save_config(config)
+            console.print("[bold green]Intervals updated![/bold green]")
+            sleep(1)
         except ValueError:
-            console.print("[bold red]Please enter valid numbers for intervals.[/bold red]")
-
-    if choice.lower() == 'all':
-        for entry in config["Config"]:
-            entry["messages"][0]["min_interval"], entry["messages"][0]["max_interval"] = mini, maxi
-    else:
-        config["Config"][int(choice)-1]["messages"][0]["min_interval"], config["Config"][int(choice)-1]["messages"][0]["max_interval"] = mini, maxi
-    save_config(config)
-    console.print("[bold green]Intervals updated successfully![/bold green]")
-    sleep(1.5)
+            console.print("[bold red]Please enter valid numbers.[/bold red]"); sleep(1)
 
 def delete_channel_wizard():
-    config = load_config()
-    if not config or not config.get("Config"): 
-        console.clear()
-        console.print("[bold red]No channels found in the active profile![/bold red]")
-        sleep(2)
-        return
-        
     while True:
+        config = load_config()
+        if not config or not config.get("Config"): 
+            console.clear()
+            console.print("[bold red]No channels found in the active profile![/bold red]")
+            sleep(2)
+            return
+            
         console.clear()
         display_channel_content_table(config, "Select Channel to Delete")
         console.print("[dim]Use 'all' to delete ALL channels in this profile.[/dim]")
@@ -397,7 +411,7 @@ def delete_channel_wizard():
                 save_config(config)
                 console.print("[bold green]All channels deleted.[/bold green]")
                 sleep(1.5)
-            return
+            continue
 
         try:
             idx = int(choice) - 1
@@ -409,14 +423,11 @@ def delete_channel_wizard():
                     save_config(config)
                     console.print(f"[bold green]Successfully deleted '{target_name}'.[/bold green]")
                     sleep(1.5)
-                break
             else:
-                console.print("[bold red]ID out of range.[/bold red]")
+                console.print("[bold red]ID out of range.[/bold red]"); sleep(1)
         except ValueError:
-            console.print("[bold red]Please enter a valid number or 'all'.[/bold red]")
-        sleep(1)
+            console.print("[bold red]Invalid input.[/bold red]"); sleep(1)
 
-# --- Config Loadout Management Wizard ---
 def profile_manager_wizard():
     while True:
         console.clear()
@@ -449,7 +460,7 @@ def profile_manager_wizard():
             table.add_row(str(i+1), p, channels_count, token_status, status)
             
         console.print(table)
-        console.print("\n1. [bold green]Switch Profile[/bold green]\n2. [bold cyan]Create New[/bold cyan]\n3. [bold yellow]Rename[/bold yellow]\n4. [bold blue]Clone[/bold blue]\n5. [bold red]Delete Profile[/bold red]\n6. Go Back")
+        console.print("\n1. [bold green]Switch Profile[/bold green]\n2. [bold cyan]Create New[/bold cyan]\n3. [bold yellow]Rename[/bold yellow]\n4. [bold blue]Clone[/bold blue]\n5. [bold red]Delete Profile[/bold red]\n6. [bold white]Go Back[/bold white]")
         choice = Prompt.ask("Action", choices=["1","2","3","4","5","6"])
         
         if choice == "1":
@@ -469,6 +480,32 @@ def profile_manager_wizard():
             if not os.path.exists(filename):
                 with open(filename, 'w') as f:
                     json.dump({"Discord_Token": "", "Config": []}, f, indent=4)
+        elif choice == "3":
+            idx_str = Prompt.ask("Rename Profile ID")
+            try:
+                idx = int(idx_str) - 1
+                if 0 <= idx < len(profiles):
+                    old_name = profiles[idx]
+                    new_name = Prompt.ask("Enter new name").strip()
+                    if new_name:
+                        new_name = "".join([c for c in new_name if c.isalnum() or c in ('-', '_')])
+                        os.rename(get_profile_filename(old_name), get_profile_filename(new_name))
+                        if active == old_name:
+                            mgr = get_manager()
+                            mgr["active_profile"] = new_name
+                            save_manager(mgr)
+            except (ValueError, IndexError): pass
+        elif choice == "4":
+            idx_str = Prompt.ask("Clone Profile ID")
+            try:
+                idx = int(idx_str) - 1
+                if 0 <= idx < len(profiles):
+                    old_name = profiles[idx]
+                    new_name = Prompt.ask("Enter new cloned name").strip()
+                    if new_name:
+                        new_name = "".join([c for c in new_name if c.isalnum() or c in ('-', '_')])
+                        shutil.copy(get_profile_filename(old_name), get_profile_filename(new_name))
+            except (ValueError, IndexError): pass
         elif choice == "5":
             idx_str = Prompt.ask("Delete Profile ID")
             try:
@@ -483,7 +520,6 @@ def profile_manager_wizard():
             except (ValueError, IndexError): pass
         elif choice == "6": break
 
-# --- Utilities ---
 def get_multiline_input(prompt_text):
     console.print(f"[yellow]{prompt_text}[/yellow] [dim](Type 'END' to save, 'c' to cancel)[/dim]")
     lines = []
@@ -497,7 +533,7 @@ def get_multiline_input(prompt_text):
 def display_interval_table(config):
     table = Table(title="Channel Intervals", header_style="bold magenta")
     table.add_column("ID", justify="center", style="cyan")
-    table.add_column("Nickname", style="green")
+    table.add_column("Channel(s)", style="green")
     table.add_column("Channel ID", style="yellow")
     table.add_column("Interval Range", style="blue")
     table.add_column("Message Preview", style="dim white")
