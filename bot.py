@@ -17,14 +17,8 @@ from rich.align import Align
 app = typer.Typer()
 console = Console()
 
-BANNER = """
- █████╗ ██╗   ██╗████████╗ ██████╗     ███╗   ███╗███████╗ ██████╗ 
-██╔══██╗██║   ██║╚══██╔══╝██╔═══██╗    ████╗ ████║██╔════╝██╔════╝ 
-███████║██║   ██║   ██║   ██║   ██║    ██╔████╔██║███████╗██║  ███╗
-██╔══██║██║   ██║   ██║   ██║   ██║    ██║╚██╔╝██║╚════██║██║   ██║
-██║  ██║╚██████╔╝   ██║   ╚██████╔╝    ██║ ╚═╝ ██║███████║╚██████╔╝
-╚═╝  ╚═╝ ╚═════╝    ╚═╝    ╚═════╝     ╚═╝     ╚═╝╚══════╝ ╚═════╝ 
-"""
+# Cleaned up banner to let Panel.fit handle the box framing perfectly without emoji distortion
+BANNER = "🤖 ✨ [bold cyan]A U T O   M S G   N I   A X L E[/bold cyan] ✨ 💬"
 
 shutdown_event = threading.Event()
 channel_statuses = {}
@@ -111,7 +105,30 @@ def display_channel_content_table(config, title="Channel Messages"):
         table.add_row(str(i+1), entry["name"], preview)
     console.print(table)
 
+def fetch_channel_and_guild_info(cid, token):
+    try:
+        conn = HTTPSConnection("discordapp.com", 443)
+        conn.request("GET", f"/api/v9/channels/{cid}", body=None, headers={"authorization": token})
+        resp = conn.getcall = conn.getresponse()
+        if 199 < resp.status < 300:
+            channel_data = loads(resp.read().decode())
+            channel_name = channel_data.get("name", "Unknown-Channel")
+            guild_id = channel_data.get("guild_id")
+            
+            server_name = "Direct Message / Group"
+            if guild_id:
+                conn.request("GET", f"/api/v9/guilds/{guild_id}", body=None, headers={"authorization": token})
+                g_resp = conn.getcall = conn.getcall = conn.getresponse()
+                if 199 < g_resp.status < 300:
+                    guild_data = loads(g_resp.read().decode())
+                    server_name = guild_data.get("name", "Unknown Server")
+            return server_name, channel_name
+    except Exception:
+        pass
+    return None, None
+
 def start_bot():
+    console.clear()
     config = load_config()
     if not config or not config.get("Global_Token"): 
         console.print("[bold red]Error: No Global Token set![/bold red]")
@@ -132,10 +149,28 @@ def start_bot():
             shutdown_event.set()
 
 def setup_wizard():
+    console.clear()
     config = load_config() or {"Global_Token": "", "Config": []}
-    name = Prompt.ask("Nickname (or 'c' to cancel)")
+    tok = config.get("Global_Token")
+    
+    cid = Prompt.ask("Channel ID (or 'c' to cancel)")
+    if cid.lower() == 'c': return
+    
+    server_name, channel_name = None, None
+    if tok and tok.strip():
+        with console.status("[bold cyan]Fetching channel and server details...[/bold cyan]"):
+            server_name, channel_name = fetch_channel_and_guild_info(cid, tok)
+            
+    if server_name and channel_name:
+        console.print(f"[bold green]✓ Connected to Server: [yellow]{server_name}[/yellow] | Channel: [yellow]#{channel_name}[/yellow][/bold green]\n")
+        default_name = channel_name
+    else:
+        console.print("[bold yellow]⚠ Could not fetch details automatically (Check your Global Token or ID).[/bold yellow]\n")
+        default_name = ""
+
+    name = Prompt.ask("Nickname (or 'c' to cancel)", default=default_name)
     if name.lower() == 'c': return
-    cid = Prompt.ask("Channel ID")
+    
     msg = get_multiline_input("Message content")
     if msg.lower() == 'c': return
     
@@ -151,6 +186,7 @@ def setup_wizard():
     save_config(config)
 
 def update_token_wizard():
+    console.clear()
     config = load_config() or {"Global_Token": "", "Config": []}
     new_token = Prompt.ask("Enter Global Token (or 'c' to cancel)")
     if new_token.lower() == 'c': return
@@ -160,6 +196,7 @@ def update_token_wizard():
 def edit_message_wizard():
     config = load_config()
     if not config or not config["Config"]: return
+    console.clear()
     while True:
         display_channel_content_table(config, "Select Channel to Edit Message")
         choice = Prompt.ask("Select ID, 'all', or 'c' to cancel")
@@ -172,6 +209,7 @@ def edit_message_wizard():
         except ValueError:
             console.print(f"[bold red]Error: '{choice}' is not a valid ID.[/bold red]")
 
+    console.clear()
     new_msg = get_multiline_input("Enter new message (or 'c' to cancel)")
     if new_msg.lower() == 'c': return
     if choice.lower() == 'all':
@@ -183,6 +221,7 @@ def edit_message_wizard():
 def interval_wizard():
     config = load_config()
     if not config or not config["Config"]: return
+    console.clear()
     while True:
         display_interval_table(config)
         choice = Prompt.ask("Select ID, 'all', or 'c' to cancel")
@@ -191,6 +230,7 @@ def interval_wizard():
             break
         console.print("[bold red]Invalid selection. Try again.[/bold red]")
     
+    console.clear()
     while True:
         try:
             mini = float(Prompt.ask("New Min"))
@@ -209,6 +249,7 @@ def interval_wizard():
 def delete_channel_wizard():
     config = load_config()
     if not config or not config["Config"]: return
+    console.clear()
     while True:
         display_channel_content_table(config, "Select Channel to Delete")
         choice = Prompt.ask("Select ID to delete or 'c' to cancel")
@@ -216,12 +257,17 @@ def delete_channel_wizard():
         try:
             idx = int(choice) - 1
             if 0 <= idx < len(config["Config"]):
-                config["Config"].pop(idx)
+                target_name = config["Config"][idx]["name"]
+                confirm = Prompt.ask(f"Are you sure you want to delete '[bold red]{target_name}[/bold red]'? (y/n)", choices=["y", "n"], default="n")
+                if confirm.lower() == 'y':
+                    config["Config"].pop(idx)
+                    save_config(config)
+                    console.print(f"[bold green]Successfully deleted '{target_name}'.[/bold green]")
+                    sleep(1.5)
                 break
             console.print("[bold red]ID out of range.[/bold red]")
         except ValueError:
             console.print("[bold red]Please enter a valid number ID.[/bold red]")
-    save_config(config)
 
 def get_multiline_input(prompt_text):
     console.print(f"[yellow]{prompt_text}[/yellow] [dim](Type 'END' to save, 'c' to cancel)[/dim]")
@@ -246,6 +292,7 @@ def display_interval_table(config):
 @app.command()
 def main():
     while True:
+        console.clear()
         console.print(Panel.fit(BANNER, title="Discord Automator", border_style="blue"))
         console.print("\n1. [bold green]Start Bot[/bold green]\n2. [bold cyan]Add New Channels[/bold cyan]\n3. [bold magenta]Update Global Token[/bold magenta]\n4. [bold yellow]Edit Messages[/bold yellow]\n5. [bold blue]Change Intervals[/bold blue]\n6. [bold red]Delete Channels[/bold red]\n7. Exit")
         c = Prompt.ask("Action", choices=["1","2","3","4","5","6","7"])
